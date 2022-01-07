@@ -3,37 +3,45 @@
 # https://docs.microsoft.com/azure/devops/pipelines/languages/docker
 
 trigger:
-- master
+  - none
 
-resources:
-- repo: self
+pool: $(agent_pool_name)
 
 variables:
-  # Container registry service connection established during pipeline creation
-  dockerRegistryServiceConnection: 'aadc3b2e-c5e9-4406-ae16-fbcd0fa73a3f'
-  imageRepository: 'angelusgipipelinesjavascriptdocker'
-  containerRegistry: 'xmasdevacr.azurecr.io'
-  dockerfilePath: '$(Build.SourcesDirectory)/app/Dockerfile'
-  tag: '$(Build.BuildId)'
-
-  # Agent VM image name
-  vmImageName: 'ubuntu-latest'
+  - group: "Variable Group"
+  - name: dockerfilePath
+    value: '$(Build.SourcesDirectory)/app/Dockerfile'
+  - name: tag
+    value: '$(Build.BuildId)'
 
 stages:
-- stage: Build
-  displayName: Build and push stage
+- stage: Build_and_push
   jobs:
-  - job: Build
-    displayName: Build
-    pool:
-      vmImage: $(vmImageName)
+  - job: Build_and_push
+    displayName: Build and push Docker image
     steps:
+    - task: DockerInstaller@0
+      displayName: Install Docker
+      inputs:
+        dockerVersion: '17.09.0-ce'
     - task: Docker@2
-      displayName: Build and push an image to container registry
+      enabled: true
+      displayName: Build and push an image to Azure container registry
       inputs:
         command: buildAndPush
-        repository: $(imageRepository)
+        repository: $(project_name)
         dockerfile: $(dockerfilePath)
-        containerRegistry: $(dockerRegistryServiceConnection)
+        containerRegistry: $(docker_registry_sc_name)
         tags: |
           $(tag)
+    - task: AzureCLI@2
+      enabled: true
+      displayName: Push Docker image from ACR to ACI
+      inputs:
+        azureSubscription: '$(az_sc_name)'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          $img = "$(acr_url)/$(project_name):$(tag)"
+          Write-Host $img
+          az container create --resource-group $(az_rg_name) --name $(project_name) --image $img --registry-login-server $(acr_url) --registry-password $(acr_pwd) --registry-username $(acr_user) --os-type Linux --restart-policy OnFailure
